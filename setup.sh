@@ -36,6 +36,10 @@ require_root() {
     fi
 }
 
+is_installed() {
+    systemctl cat "$SERVICE_NAME.service" &> /dev/null
+}
+
 # ---------- actions ----------
 do_install() {
     require_root
@@ -43,6 +47,13 @@ do_install() {
     echo "========================================="
     echo "   PingTunnel Server Installer"
     echo "========================================="
+
+    # 0. Already installed? Abort.
+    if is_installed; then
+        echo "PingTunnel is already installed on this system."
+        echo "If you want to reinstall, first remove it via option 2 (Uninstall)."
+        exit 0
+    fi
 
     # 1. Password prompt (from /dev/tty so it works with curl | bash)
     while true; do
@@ -62,7 +73,7 @@ do_install() {
     done
     echo "Password set successfully."
 
-    # 2. Dependency: only curl now (no unzip needed)
+    # 2. Dependency: only curl now
     if ! command -v curl &> /dev/null; then
         echo "Installing curl..."
         install_pkg curl
@@ -75,7 +86,6 @@ do_install() {
     echo "Downloading PingTunnel binary..."
     curl -fL -o "$BINARY_NAME" "$BINARY_URL"
 
-    # Sanity check: file must exist and not be tiny (e.g. an HTML error page)
     if [ ! -f "$BINARY_NAME" ]; then
         echo "Download failed: file not saved."
         exit 1
@@ -88,12 +98,8 @@ do_install() {
         exit 1
     fi
 
-    # 4. Make executable and verify it runs
+    # 4. Make executable
     chmod +x "$BINARY_NAME"
-    if ! "./$BINARY_NAME" -h &> /dev/null && [ $? -ne 1 ]; then
-        echo "Warning: binary did not respond to -h as expected."
-        echo "Continuing anyway..."
-    fi
     echo "Binary installed ($SIZE bytes)."
 
     # 5. Generate JSON config
@@ -153,6 +159,12 @@ do_uninstall() {
     echo "========================================="
     echo "   PingTunnel Uninstaller"
     echo "========================================="
+
+    if ! is_installed && [ ! -d "$INSTALL_DIR" ]; then
+        echo "PingTunnel is NOT installed. Nothing to remove."
+        exit 0
+    fi
+
     read -rp "Are you sure you want to remove PingTunnel? [y/N]: " CONFIRM < /dev/tty
     case "$CONFIRM" in
         [yY][eE][sS]|[yY]) ;;
@@ -185,8 +197,8 @@ do_status() {
     echo "   PingTunnel Status"
     echo "========================================="
 
-    if systemctl list-unit-files 2>/dev/null | grep -q "^$SERVICE_NAME.service"; then
-        systemctl status "$SERVICE_NAME.service" --no-pager || true
+    if systemctl cat "$SERVICE_NAME.service" &> /dev/null; then
+        systemctl status "$SERVICE_NAME.service" --no-pager -l || true
         echo ""
         echo "---- Last 20 log lines ----"
         journalctl -u "$SERVICE_NAME.service" -n 20 --no-pager || true
